@@ -12,6 +12,44 @@
 
 using namespace std;
 
+namespace {
+    /** Writes n_bytes to the file at the given offset, dealing with partial
+        writes and interrupted calls. Returns the number of written bytes,
+        or -1 with errno set in case of error. */
+    ssize_t pwrite_all(
+            const int fd,
+            const void* buffer,
+            const size_t n_bytes,
+            const off_t offset)
+    {
+        auto data = static_cast<const char*>(buffer);
+        size_t n_written = 0;
+
+        while (n_written < n_bytes) {
+            auto n_current = ::pwrite(fd, data + n_written,
+                                      n_bytes - n_written,
+                                      offset + n_written);
+
+            if (n_current < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+
+                return -1;
+            }
+
+            if (n_current == 0) {
+                errno = EIO;
+                return -1;
+            }
+
+            n_written += static_cast<size_t>(n_current);
+        }
+
+        return static_cast<ssize_t>(n_written);
+    }
+}
+
 BufferBinaryWriter::BufferBinaryWriter(
         const string& detector_folder,
         const string& module_name):
@@ -43,25 +81,9 @@ void BufferBinaryWriter::write(
             BufferUtils::get_file_frame_index(pulse_id) *
             sizeof(BufferBinaryFormat);
 
-    auto lseek_result = lseek(output_file_fd_, n_bytes_offset, SEEK_SET);
-    if (lseek_result < 0) {
-        stringstream err_msg;
-
-        using namespace date;
-        using namespace chrono;
-        err_msg << "[" << system_clock::now() << "]";
-        err_msg << "[BufferBinaryWriter::write]";
-        err_msg << " Error while lseek on file ";
-        err_msg << current_output_filename_;
-        err_msg << " for n_bytes_offset ";
-        err_msg << n_bytes_offset << ": ";
-        err_msg << strerror(errno) << endl;
-
-        throw runtime_error(err_msg.str());
-    }
-
-    auto n_bytes = ::write(output_file_fd_, buffer, sizeof(BufferBinaryFormat));
-    if (n_bytes < sizeof(BufferBinaryFormat)) {
+    auto n_bytes = pwrite_all(output_file_fd_, buffer,
+                              sizeof(BufferBinaryFormat), n_bytes_offset);
+    if (n_bytes < 0) {
         stringstream err_msg;
 
         using namespace date;
@@ -69,8 +91,12 @@ void BufferBinaryWriter::write(
         err_msg << "[" << system_clock::now() << "]";
         err_msg << "[BufferBinaryWriter::write]";
         err_msg << " Error while writing to file ";
-        err_msg << current_output_filename_ << ": ";
+        err_msg << current_output_filename_;
+        err_msg << " for n_bytes_offset ";
+        err_msg << n_bytes_offset << ": ";
         err_msg << strerror(errno) << endl;
+
+        cerr << err_msg.str();
 
         throw runtime_error(err_msg.str());
     }
@@ -95,6 +121,8 @@ void BufferBinaryWriter::open_file(const std::string& filename)
         err_msg << filename << ": ";
         err_msg << strerror(errno) << endl;
 
+        cerr << err_msg.str();
+
         throw runtime_error(err_msg.str());
     }
 
@@ -104,33 +132,22 @@ void BufferBinaryWriter::open_file(const std::string& filename)
         metadata updates on GPFS. */
     {
         // TODO: Try instead to use fallocate.
-        if (lseek(output_file_fd_, MAX_FILE_BYTES, SEEK_SET) < 0) {
+        const uint8_t mark = 255;
+        if (pwrite_all(output_file_fd_, &mark,
+                       sizeof(mark), MAX_FILE_BYTES) < 0) {
             stringstream err_msg;
 
             using namespace date;
             using namespace chrono;
             err_msg << "[" << system_clock::now() << "]";
             err_msg << "[BufferBinaryWriter::open_file]";
-            err_msg << " Error while lseek on end of file ";
-            err_msg << current_output_filename_;
+            err_msg << " Error while writing to end of file ";
+            err_msg << filename;
             err_msg << " for MAX_FILE_BYTES ";
             err_msg << MAX_FILE_BYTES << ": ";
             err_msg << strerror(errno) << endl;
 
-            throw runtime_error(err_msg.str());
-        }
-
-        const uint8_t mark = 255;
-        if(::write(output_file_fd_, &mark, sizeof(mark)) != sizeof(mark)) {
-            stringstream err_msg;
-
-            using namespace date;
-            using namespace chrono;
-            err_msg << "[" << system_clock::now() << "]";
-            err_msg << "[BufferBinaryWriter::open_file]";
-            err_msg << " Error while writing to file ";
-            err_msg << current_output_filename_ << ": ";
-            err_msg << strerror(errno) << endl;
+            cerr << err_msg.str();
 
             throw runtime_error(err_msg.str());
         }
@@ -153,6 +170,8 @@ void BufferBinaryWriter::close_current_file()
             err_msg << " Error while closing file ";
             err_msg << current_output_filename_ << ": ";
             err_msg << strerror(errno) << endl;
+
+            cerr << err_msg.str();
 
             throw runtime_error(err_msg.str());
         }

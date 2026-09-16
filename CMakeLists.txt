@@ -30,6 +30,10 @@ add_subdirectory(
         ${CMAKE_CURRENT_BINARY_DIR}/googletest-build
         EXCLUDE_FROM_ALL)
 
+# Enabled here so that googletest, added above, is not affected. The vendored
+# code in core-buffer/external is excluded in its own CMakeLists.
+add_compile_options(-Wall -Wextra)
+
 add_subdirectory("core-buffer")
 add_subdirectory("jf-udp-recv")
 add_subdirectory("jf-buffer-writer")
