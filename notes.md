@@ -1,6 +1,5 @@
 ### BufferBinaryWriter.cpp:63-64
-Ignored write() error: if write returns -1, in the comparison of line 64 it is casted to size_t which is unsigned (even if its type was size_t which is signed), and it turns to SIZE_MAX which is always not less than sizeof()...
-Possible exception is never raised.
+Ignored `::write()` error: if `::write()` returns -1, in the comparison of line 64 it is casted to `size_t` which is unsigned (even if its type was `ssize_t` which is signed), and it turns to `SIZE_MAX` which is always not less than `sizeof()`... Consequently exception is never raised.
 
 Test code:
 ```
